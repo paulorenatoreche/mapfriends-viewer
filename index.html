@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>MapFriends - World Explorer</title>
+    <title>MapWithFriends - World Explorer</title>
     
     <link rel="stylesheet" href="https://unpkg.com/jsvectormap/dist/css/jsvectormap.min.css" />
     
@@ -138,4 +138,196 @@
     <script src="https://unpkg.com/jsvectormap/dist/maps/world.js"></script>
 
     <script>
-        const API_URL = "
+        const API_URL = "https://script.google.com/macros/s/AKfycbxFH02UbXIWcJq48-uMlxnIoTpO2krpI4FYL66M_MmcJSKOQptVlF-OG3oHL7t8bJOV/exec"; 
+        
+        let globalData = [];
+        let geoJsonFeatures = []; 
+        let worldGlobe;
+        let map2D;
+        let activeCountries = [];
+
+        const mapStyles = {
+            night: '//unpkg.com/three-globe/example/img/earth-night.jpg',
+            day: '//unpkg.com/three-globe/example/img/earth-day.jpg',
+            satellite: '//unpkg.com/three-globe/example/img/earth-blue-marble.jpg'
+        };
+
+        function getFlagEmoji(countryCode) {
+            if (!countryCode || countryCode.length !== 2 || countryCode === '-99') return "🌍";
+            const codePoints = countryCode.toUpperCase().split('').map(char => 127397 + char.charCodeAt());
+            return String.fromCodePoint(...codePoints);
+        }
+
+        document.addEventListener("DOMContentLoaded", async () => {
+            // 1. Carrega Banco de Dados
+            try {
+                const response = await fetch(API_URL, { redirect: "follow" });
+                globalData = await response.json();
+            } catch (error) {
+                console.error("Erro ao carregar dados:", error);
+            }
+
+            activeCountries = [...new Set(globalData.map(item => item.country))];
+
+            // 2. Inicializa o Mapa 2D (jsvectormap)
+            map2D = new jsVectorMap({
+                selector: "#map-container-2d",
+                map: "world",
+                backgroundColor: "#ffffff",
+                zoomOnScroll: true,
+                zoomButtons: false,
+                regionStyle: {
+                    initial: { fill: "#e5e5ea", stroke: "#ffffff", strokeWidth: 0.5 },
+                    selected: { fill: "rgba(52, 199, 89, 0.5)" }, // 50% de Transparência
+                    hover: { fill: "#c7c7cc" }
+                },
+                onRegionClick: function(event, code) {
+                    const countryName = map2D.regions[code].config.name;
+                    openModal(countryName, getFlagEmoji(code));
+                }
+            });
+
+            // Colore os países no mapa 2D
+            const codesToSelect2D = [];
+            for (let code in map2D.regions) {
+                if (activeCountries.includes(map2D.regions[code].config.name)) codesToSelect2D.push(code);
+            }
+            if(codesToSelect2D.length > 0) map2D.setSelectedRegions(codesToSelect2D);
+
+            // 3. Inicializa o Globo 3D (Globe.gl)
+            fetch('https://raw.githubusercontent.com/vasturiano/globe.gl/master/example/datasets/ne_110m_admin_0_countries.geojson')
+                .then(res => res.json())
+                .then(countries => {
+                    geoJsonFeatures = countries.features; 
+                    document.getElementById('loading-indicator').style.display = 'none';
+
+                    worldGlobe = Globe()
+                        (document.getElementById('globeViz'))
+                        .globeImageUrl(mapStyles.night) 
+                        .polygonsData(countries.features)
+                        .polygonAltitude(0.01)
+                        .polygonCapColor(feat => {
+                            const countryName = feat.properties.ADMIN;
+                            // 50% de transparência para países com resposta
+                            return activeCountries.includes(countryName) ? 'rgba(52, 199, 89, 0.5)' : 'rgba(100, 100, 100, 0.15)';
+                        })
+                        .polygonSideColor(() => 'rgba(0, 0, 0, 0.1)')
+                        .polygonStrokeColor(() => '#111')
+                        .polygonLabel(({ properties: d }) => `
+                            <div style="background: rgba(0,0,0,0.8); padding: 8px; border-radius: 8px; color: white; font-family: sans-serif;">
+                                <b>${d.ADMIN}</b>
+                            </div>
+                        `)
+                        .onPolygonClick(({ properties: d }) => {
+                            openModal(d.ADMIN, getFlagEmoji(d.ISO_A2));
+                        });
+
+                    worldGlobe.controls().autoRotate = true;
+                    worldGlobe.controls().autoRotateSpeed = 0.5; 
+                    worldGlobe.controls().enableZoom = true; 
+                    worldGlobe.pointOfView({ altitude: 2.2 });
+                });
+        });
+
+        // Evento para trocar a cor e o tipo do mapa
+        document.getElementById('map-style-selector').addEventListener('change', (e) => {
+            const selectedStyle = e.target.value;
+            const uiBar = document.getElementById('ui-bar');
+            
+            if (selectedStyle === '2d') {
+                // Ativa a interface 2D Clara
+                document.getElementById('globeViz').style.display = 'none';
+                document.getElementById('map-container-2d').style.display = 'block';
+                uiBar.classList.add('light-mode-ui');
+                // Força o jsvectormap a recalcular o tamanho na tela
+                window.dispatchEvent(new Event('resize')); 
+            } else {
+                // Ativa a interface 3D Escura/Espacial
+                document.getElementById('globeViz').style.display = 'block';
+                document.getElementById('map-container-2d').style.display = 'none';
+                uiBar.classList.remove('light-mode-ui');
+                
+                worldGlobe.globeImageUrl(mapStyles[selectedStyle]);
+                
+                if(selectedStyle === 'day' || selectedStyle === 'satellite') {
+                    worldGlobe.polygonStrokeColor(() => 'rgba(255,255,255,0.3)');
+                } else {
+                    worldGlobe.polygonStrokeColor(() => '#111');
+                }
+            }
+        });
+
+        function openModal(countryName, flagEmoji) {
+            document.getElementById("country-title").innerText = flagEmoji + " " + countryName;
+            const historyContainer = document.getElementById("previous-answers");
+            historyContainer.innerHTML = "";
+            const countryData = globalData.filter(item => item.country === countryName);
+            
+            if (countryData.length > 0) {
+                countryData.forEach(entry => {
+                    historyContainer.innerHTML += `
+                        <div class="history-card">
+                            <p><span>Food:</span> ${entry.food}</p>
+                            <p><span>City:</span> ${entry.city}</p>
+                            <p><span>Nature:</span> ${entry.nature}</p>
+                            <p><span>Music:</span> ${entry.music}</p>
+                            <p><span>Name:</span> ${entry.name || 'Anonymous'}</p>
+                        </div>
+                    `;
+                });
+            } else {
+                historyContainer.innerHTML = `<p style="color: #8e8e93; font-size: 15px; font-style: italic; text-align: center;">No recommendations for this country yet.</p>`;
+            }
+            document.getElementById("modal").style.display = "flex";
+        }
+
+        function closeModal() { document.getElementById("modal").style.display = "none"; }
+
+        // Lógica da Lista Completa com correção de Bandeiras
+        document.getElementById("view-all-btn").addEventListener("click", () => {
+            const listContainer = document.getElementById("all-responses-list");
+            listContainer.innerHTML = "";
+
+            if (globalData.length === 0) {
+                listContainer.innerHTML = `<p style="color: #8e8e93; text-align: center; margin-top: 20px;">No recommendations yet.</p>`;
+            } else {
+                const sortedData = [...globalData].sort((a, b) => a.country.localeCompare(b.country));
+                
+                sortedData.forEach(entry => {
+                    let cCode = "";
+                    if(entry.country === 'Hong Kong') {
+                        cCode = 'HK';
+                    } else {
+                        // Cruza o nome do país com a base de dados do mapa para achar a sigla ISO exata
+                        const countryFeature = geoJsonFeatures.find(f => f.properties.ADMIN === entry.country);
+                        if(countryFeature) {
+                            cCode = countryFeature.properties.ISO_A2;
+                        } else {
+                            // Tenta achar a sigla no jsvectormap caso os nomes divirjam levemente
+                            for(let code in map2D.regions) {
+                                if(map2D.regions[code].config.name === entry.country) { cCode = code; break; }
+                            }
+                        }
+                    }
+                    
+                    const emj = getFlagEmoji(cCode);
+                    
+                    listContainer.innerHTML += `
+                        <div class="history-card">
+                            <h4>${emj} ${entry.country}</h4>
+                            <p><span>Food:</span> ${entry.food}</p>
+                            <p><span>City:</span> ${entry.city}</p>
+                            <p><span>Nature:</span> ${entry.nature}</p>
+                            <p><span>Music:</span> ${entry.music}</p>
+                            <p><span>Name:</span> ${entry.name || 'Anonymous'}</p>
+                        </div>
+                    `;
+                });
+            }
+            document.getElementById("all-responses-modal").style.display = "flex";
+        });
+
+        function closeAllResponsesModal() { document.getElementById("all-responses-modal").style.display = "none"; }
+    </script>
+</body>
+</html>
