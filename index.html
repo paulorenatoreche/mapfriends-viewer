@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>MapWithFriends_v2</title>
+    <title>MapWithFriends_v2.1 - World Explorer</title>
     
     <link rel="stylesheet" href="https://unpkg.com/jsvectormap/dist/css/jsvectormap.min.css" />
     
@@ -141,7 +141,7 @@
         let worldGlobe;
         let map2D;
         
-        // Uso de Set (Conjunto) para ganho dramático de performance na hora de colorir o mapa
+        // Uso de Set (Conjunto) para performance
         let activeCountriesSet = new Set();
 
         const mapStyles = {
@@ -156,11 +156,33 @@
             return String.fromCodePoint(...codePoints);
         }
 
-        // Função crucial que resolve o bug dos Estados Unidos
+        // Dicionário Robusto para alinhar banco de dados com Globo 3D
         function getStandardCountryName(globeName) {
-            if (globeName === 'United States of America') return 'United States';
-            if (globeName === 'The Bahamas') return 'Bahamas';
-            return globeName;
+            const nameMap = {
+                'United States of America': 'United States',
+                'The Bahamas': 'Bahamas',
+                'South Korea': 'Korea', // Correção fundamental
+                'North Korea': 'Dem. Rep. Korea',
+                'Russian Federation': 'Russia',
+                'Republic of Serbia': 'Serbia',
+                'United Republic of Tanzania': 'Tanzania',
+                'Democratic Republic of the Congo': 'Dem. Rep. Congo',
+                'Republic of the Congo': 'Congo',
+                'Ivory Coast': 'Côte d\'Ivoire',
+                'Dominican Republic': 'Dominican Rep.',
+                'Central African Republic': 'Central African Rep.',
+                'Equatorial Guinea': 'Eq. Guinea',
+                'Bosnia and Herzegovina': 'Bosnia and Herz.',
+                'Solomon Islands': 'Solomon Is.',
+                'Falkland Islands': 'Falkland Is.',
+                'South Sudan': 'S. Sudan',
+                'Republic of Macedonia': 'North Macedonia',
+                'Macedonia': 'North Macedonia',
+                'Swaziland': 'Eswatini',
+                'Vatican': 'Vatican City',
+                'East Timor': 'Timor-Leste'
+            };
+            return nameMap[globeName] || globeName;
         }
 
         document.addEventListener("DOMContentLoaded", async () => {
@@ -172,7 +194,6 @@
                 console.error("Erro ao carregar dados:", error);
             }
 
-            // Otimização: Estrutura de dados hiper-rápida (Set) em vez de Array comum
             activeCountriesSet = new Set(globalData.map(item => item.country));
 
             // 2. Inicializa o Globo 3D
@@ -188,9 +209,11 @@
                         .polygonsData(countries.features)
                         .polygonAltitude(0.01)
                         .polygonCapColor(feat => {
-                            // Bug dos Estados Unidos corrigido aqui!
-                            const countryName = getStandardCountryName(feat.properties.ADMIN);
-                            return activeCountriesSet.has(countryName) ? 'rgba(52, 199, 89, 0.5)' : 'rgba(100, 100, 100, 0.15)';
+                            const globeName = feat.properties.ADMIN;
+                            const standardName = getStandardCountryName(globeName);
+                            // Dupla checagem infalível: procura pelo nome original ou o traduzido
+                            const hasData = activeCountriesSet.has(globeName) || activeCountriesSet.has(standardName);
+                            return hasData ? 'rgba(52, 199, 89, 0.5)' : 'rgba(100, 100, 100, 0.15)';
                         })
                         .polygonSideColor(() => 'rgba(0, 0, 0, 0.1)')
                         .polygonStrokeColor(() => '#111')
@@ -200,8 +223,12 @@
                             </div>
                         `)
                         .onPolygonClick(({ properties: d }) => {
-                            const cName = getStandardCountryName(d.ADMIN);
-                            openModal(cName, getFlagEmoji(d.ISO_A2));
+                            const globeName = d.ADMIN;
+                            const standardName = getStandardCountryName(globeName);
+                            // Determina qual versão de nome usar para consultar os dados
+                            const finalName = activeCountriesSet.has(standardName) ? standardName : globeName;
+                            
+                            openModal(finalName, getFlagEmoji(d.ISO_A2));
                         });
 
                     worldGlobe.controls().autoRotate = true;
@@ -211,9 +238,9 @@
                 });
         });
 
-        // Lógica de Lazy Loading para resolver lentidão e o bug do Mapa 2D em branco
+        // Lazy Loading para resolver lentidão e o bug do Mapa 2D
         function initialize2DMap() {
-            if (map2D) return; // Já foi criado
+            if (map2D) return;
 
             map2D = new jsVectorMap({
                 selector: "#map-container-2d",
@@ -247,7 +274,6 @@
             const map2DContainer = document.getElementById('map-container-2d');
 
             if (selectedStyle === '2d') {
-                // Ativa a interface 2D Clara
                 globeContainer.style.opacity = '0';
                 globeContainer.style.visibility = 'hidden';
                 globeContainer.style.pointerEvents = 'none';
@@ -258,12 +284,11 @@
                 
                 uiBar.classList.add('light-mode-ui');
                 
-                // Inicializa o 2D SOMENTE agora que ele está visível (Resolve o Bug e a Lentidão!)
+                // Inicializa o 2D SOMENTE agora
                 initialize2DMap();
                 window.dispatchEvent(new Event('resize')); 
                 
             } else {
-                // Ativa a interface 3D
                 globeContainer.style.visibility = 'visible';
                 globeContainer.style.opacity = '1';
                 globeContainer.style.pointerEvents = 'auto';
@@ -310,7 +335,7 @@
 
         function closeModal() { document.getElementById("modal").style.display = "none"; }
 
-        // Lógica da Lista Completa
+        // Lógica da Lista Completa (A-Z) e Correção de Bandeiras
         document.getElementById("view-all-btn").addEventListener("click", () => {
             const listContainer = document.getElementById("all-responses-list");
             listContainer.innerHTML = "";
@@ -324,9 +349,14 @@
                     let cCode = "";
                     if(entry.country === 'Hong Kong') {
                         cCode = 'HK';
+                    } else if (entry.country === 'Palestine') {
+                        cCode = 'PS';
                     } else {
-                        // Cruza o nome padronizado com os dados do mapa 3D
-                        const countryFeature = geoJsonFeatures.find(f => getStandardCountryName(f.properties.ADMIN) === entry.country);
+                        // Cruza o nome padronizado (ou original) com os dados do mapa 3D
+                        const countryFeature = geoJsonFeatures.find(f => 
+                            f.properties.ADMIN === entry.country || 
+                            getStandardCountryName(f.properties.ADMIN) === entry.country
+                        );
                         if(countryFeature) {
                             cCode = countryFeature.properties.ISO_A2;
                         } else {
