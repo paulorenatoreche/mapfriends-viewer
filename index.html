@@ -3,33 +3,63 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>MapFriends - World Explorer 3D</title>
+    <title>MapFriends - World Explorer</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/jsvectormap/dist/css/jsvectormap.min.css" />
     
     <style>
         html, body {
             margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-            background-color: #000000;
+            background-color: #000000; /* Fundo preto para o espaço 3D */
             -webkit-font-smoothing: antialiased;
         }
 
-        #globeViz {
+        #globeViz, #map-container-2d {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1;
+        }
+        
+        /* Oculta o 2D por padrão */
+        #map-container-2d {
+            display: none;
+            background-color: #ffffff;
+        }
+
+        /* Oculta os botões de zoom nativos do 2D */
+        .jvm-zoom-btn {
+            display: none !important;
         }
 
         .top-bar {
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            width: 90%; max-width: 400px; z-index: 10;
+            width: 90%; max-width: 500px; z-index: 10;
             display: flex; gap: 10px; justify-content: center;
         }
 
-        .list-btn {
+        .list-btn, .map-select {
             background: rgba(255, 255, 255, 0.15); 
             backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
             color: #ffffff; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 14px;
-            padding: 12px 24px; cursor: pointer; font-size: 16px; font-weight: 600;
+            padding: 12px; cursor: pointer; font-size: 15px; font-weight: 600;
             box-shadow: 0 4px 15px rgba(0,0,0,0.3); display: flex; align-items: center; gap: 8px;
+            outline: none;
         }
+
+        /* Estilo alternativo quando o mapa for 2D claro (para os botões não sumirem no branco) */
+        .light-mode-ui .list-btn, .light-mode-ui .map-select {
+            background: rgba(255, 255, 255, 0.85);
+            color: #1c1c1e;
+            border: 1px solid #d1d1d6;
+        }
+        .light-mode-ui .map-select option { background: #ffffff; color: #1c1c1e; }
+        .light-mode-ui .list-btn svg { stroke: #1c1c1e; }
+
+        .list-btn { padding: 12px 20px; }
+        
+        .map-select {
+            appearance: none; -webkit-appearance: none; text-align: center;
+        }
+        .map-select option { background: #1c1c1e; color: #fff; }
 
         .modal-overlay {
             display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -63,16 +93,25 @@
 </head>
 <body>
 
-    <div class="loading-text" id="loading-indicator">Loading 3D Earth...</div>
+    <div class="loading-text" id="loading-indicator">Loading World...</div>
+    
     <div id="globeViz"></div>
+    <div id="map-container-2d"></div>
 
-    <div class="top-bar">
+    <div class="top-bar" id="ui-bar">
+        <select id="map-style-selector" class="map-select">
+            <option value="night">🌙 3D Dark</option>
+            <option value="day">☀️ 3D Light</option>
+            <option value="satellite">🛰️ 3D Satellite</option>
+            <option value="2d">🗺️ 2D Original</option>
+        </select>
+
         <button class="list-btn" id="view-all-btn">
-            <svg viewBox="0 0 24 24" width="20" height="20" stroke="#ffffff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <svg id="menu-icon" viewBox="0 0 24 24" width="20" height="20" stroke="#ffffff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
                 <line x1="4" y1="9" x2="20" y2="9"></line>
                 <line x1="4" y1="15" x2="20" y2="15"></line>
             </svg>
-            Global Connections
+            Connections
         </button>
     </div>
 
@@ -87,7 +126,7 @@
 
     <div class="modal-overlay" id="all-responses-modal">
         <div class="modal-content">
-            <h2>🌍 All Connections</h2>
+            <h2>🌍 Connections</h2>
             <p class="subtitle">Everyone you've met globally (A-Z)</p>
             <div id="all-responses-list"></div>
             <button class="close-btn" type="button" onclick="closeAllResponsesModal()">Close</button>
@@ -95,115 +134,8 @@
     </div>
 
     <script src="https://unpkg.com/globe.gl"></script>
+    <script src="https://unpkg.com/jsvectormap"></script>
+    <script src="https://unpkg.com/jsvectormap/dist/maps/world.js"></script>
 
     <script>
-        const API_URL = "https://script.google.com/macros/s/AKfycbxFH02UbXIWcJq48-uMlxnIoTpO2krpI4FYL66M_MmcJSKOQptVlF-OG3oHL7t8bJOV/exec"; 
-        
-        let globalData = [];
-        let worldGlobe;
-
-        function getFlagEmoji(countryCode) {
-            if (!countryCode || countryCode.length !== 2) return "🌍";
-            const codePoints = countryCode.toUpperCase().split('').map(char => 127397 + char.charCodeAt());
-            return String.fromCodePoint(...codePoints);
-        }
-
-        document.addEventListener("DOMContentLoaded", async () => {
-            try {
-                const response = await fetch(API_URL, { redirect: "follow" });
-                globalData = await response.json();
-            } catch (error) {
-                console.error("Erro ao carregar dados:", error);
-            }
-
-            const activeCountries = [...new Set(globalData.map(item => item.country))];
-
-            fetch('https://raw.githubusercontent.com/vasturiano/globe.gl/master/example/datasets/ne_110m_admin_0_countries.geojson')
-                .then(res => res.json())
-                .then(countries => {
-                    document.getElementById('loading-indicator').style.display = 'none';
-
-                    worldGlobe = Globe()
-                        (document.getElementById('globeViz'))
-                        .globeImageUrl('//unpkg.com/three-globe/example/img/earth-night.jpg') 
-                        .polygonsData(countries.features)
-                        .polygonAltitude(0.01)
-                        .polygonCapColor(feat => {
-                            const countryName = feat.properties.ADMIN;
-                            return activeCountries.includes(countryName) ? 'rgba(52, 199, 89, 0.9)' : 'rgba(100, 100, 100, 0.2)';
-                        })
-                        .polygonSideColor(() => 'rgba(0, 0, 0, 0.1)')
-                        .polygonStrokeColor(() => '#111')
-                        .polygonLabel(({ properties: d }) => `
-                            <div style="background: rgba(0,0,0,0.8); padding: 8px; border-radius: 8px; color: white; font-family: sans-serif;">
-                                <b>${d.ADMIN}</b>
-                            </div>
-                        `)
-                        .onPolygonClick(({ properties: d }) => {
-                            openModal(d.ADMIN, getFlagEmoji(d.ISO_A2));
-                        });
-
-                    worldGlobe.controls().autoRotate = true;
-                    worldGlobe.controls().autoRotateSpeed = 0.5; 
-                    worldGlobe.controls().enableZoom = true; 
-                    worldGlobe.pointOfView({ altitude: 2.2 });
-                });
-        });
-
-        function openModal(countryName, flagEmoji) {
-            document.getElementById("country-title").innerText = flagEmoji + " " + countryName;
-            const historyContainer = document.getElementById("previous-answers");
-            historyContainer.innerHTML = "";
-            const countryData = globalData.filter(item => item.country === countryName);
-            
-            if (countryData.length > 0) {
-                countryData.forEach(entry => {
-                    historyContainer.innerHTML += `
-                        <div class="history-card">
-                            <p><span>Food:</span> ${entry.food}</p>
-                            <p><span>City:</span> ${entry.city}</p>
-                            <p><span>Nature:</span> ${entry.nature}</p>
-                            <p><span>Music:</span> ${entry.music}</p>
-                            <p><span>Name:</span> ${entry.name || 'Anonymous'}</p>
-                        </div>
-                    `;
-                });
-            } else {
-                historyContainer.innerHTML = `<p style="color: #8e8e93; font-size: 15px; font-style: italic; text-align: center;">No recommendations for this country yet.</p>`;
-            }
-            document.getElementById("modal").style.display = "flex";
-        }
-
-        function closeModal() { document.getElementById("modal").style.display = "none"; }
-
-        document.getElementById("view-all-btn").addEventListener("click", () => {
-            const listContainer = document.getElementById("all-responses-list");
-            listContainer.innerHTML = "";
-
-            if (globalData.length === 0) {
-                listContainer.innerHTML = `<p style="color: #8e8e93; text-align: center; margin-top: 20px;">No recommendations yet.</p>`;
-            } else {
-                const sortedData = [...globalData].sort((a, b) => a.country.localeCompare(b.country));
-                sortedData.forEach(entry => {
-                    let cCode = "🌍";
-                    if(entry.country === 'Hong Kong') cCode = 'HK';
-                    
-                    listContainer.innerHTML += `
-                        <div class="history-card">
-                            <h4>${getFlagEmoji(cCode)} ${entry.country}</h4>
-                            <p><span>Food:</span> ${entry.food}</p>
-                            <p><span>City:</span> ${entry.city}</p>
-                            <p><span>Nature:</span> ${entry.nature}</p>
-                            <p><span>Music:</span> ${entry.music}</p>
-                            <p><span>Name:</span> ${entry.name || 'Anonymous'}</p>
-                        </div>
-                    `;
-                });
-            }
-            document.getElementById("all-responses-modal").style.display = "flex";
-        });
-
-        function closeAllResponsesModal() { document.getElementById("all-responses-modal").style.display = "none"; }
-    </script>
-</body>
-</html>
+        const API_URL = "
