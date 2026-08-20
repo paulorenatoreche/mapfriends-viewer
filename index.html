@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MapFriends - World Explorer 3D</title>
+    
+    <style>
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            background-color: #000000;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        #globeViz {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1;
+        }
+
+        .top-bar {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            width: 90%; max-width: 400px; z-index: 10;
+            display: flex; gap: 10px; justify-content: center;
+        }
+
+        .list-btn {
+            background: rgba(255, 255, 255, 0.15); 
+            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+            color: #ffffff; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 14px;
+            padding: 12px 24px; cursor: pointer; font-size: 16px; font-weight: 600;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3); display: flex; align-items: center; gap: 8px;
+        }
+
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+            z-index: 9999; justify-content: center; align-items: flex-end; 
+        }
+
+        .modal-content {
+            background: #ffffff; width: 100%; max-height: 85vh; border-radius: 24px 24px 0 0;
+            padding: 24px; box-sizing: border-box; overflow-y: auto; -webkit-overflow-scrolling: touch; 
+            animation: slideUp 0.35s cubic-bezier(0.1, 0.8, 0.2, 1);
+        }
+
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+        h2 { margin: 0 0 4px 0; font-size: 24px; color: #1c1c1e; }
+        p.subtitle { color: #8e8e93; font-size: 14px; margin: 0 0 20px 0; }
+        
+        button.close-btn {
+            width: 100%; background: #f2f2f7; color: #007aff; padding: 16px; border: none; border-radius: 14px;
+            font-size: 16px; margin-top: 16px; cursor: pointer; font-weight: 600;
+        }
+
+        .history-card { background: #f2f2f7; padding: 16px; border-radius: 16px; margin-bottom: 16px; border: 1px solid #e5e5ea; }
+        .history-card h4 { margin: 0 0 12px 0; font-size: 18px; color: #1c1c1e; border-bottom: 1px solid #d1d1d6; padding-bottom: 8px;}
+        .history-card p { margin: 6px 0; font-size: 15px; color: #3a3a3c; line-height: 1.4; }
+        .history-card span { font-weight: 700; color: #007aff; }
+        
+        .loading-text { color: white; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 0; font-family: sans-serif;}
+    </style>
+</head>
+<body>
+
+    <div class="loading-text" id="loading-indicator">Loading 3D Earth...</div>
+    <div id="globeViz"></div>
+
+    <div class="top-bar">
+        <button class="list-btn" id="view-all-btn">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="#ffffff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="4" y1="9" x2="20" y2="9"></line>
+                <line x1="4" y1="15" x2="20" y2="15"></line>
+            </svg>
+            Global Connections
+        </button>
+    </div>
+
+    <div class="modal-overlay" id="modal">
+        <div class="modal-content">
+            <h2 id="country-title">🌍 Country Name</h2>
+            <p class="subtitle">Cultural recommendations</p>
+            <div id="previous-answers"></div>
+            <button class="close-btn" type="button" onclick="closeModal()">Close</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="all-responses-modal">
+        <div class="modal-content">
+            <h2>🌍 All Connections</h2>
+            <p class="subtitle">Everyone you've met globally (A-Z)</p>
+            <div id="all-responses-list"></div>
+            <button class="close-btn" type="button" onclick="closeAllResponsesModal()">Close</button>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/globe.gl"></script>
+
+    <script>
+        const API_URL = "https://script.google.com/macros/s/AKfycbxFH02UbXIWcJq48-uMlxnIoTpO2krpI4FYL66M_MmcJSKOQptVlF-OG3oHL7t8bJOV/exec"; 
+        
+        let globalData = [];
+        let worldGlobe;
+
+        function getFlagEmoji(countryCode) {
+            if (!countryCode || countryCode.length !== 2) return "🌍";
+            const codePoints = countryCode.toUpperCase().split('').map(char => 127397 + char.charCodeAt());
+            return String.fromCodePoint(...codePoints);
+        }
+
+        document.addEventListener("DOMContentLoaded", async () => {
+            try {
+                const response = await fetch(API_URL, { redirect: "follow" });
+                globalData = await response.json();
+            } catch (error) {
+                console.error("Erro ao carregar dados:", error);
+            }
+
+            const activeCountries = [...new Set(globalData.map(item => item.country))];
+
+            fetch('https://raw.githubusercontent.com/vasturiano/globe.gl/master/example/datasets/ne_110m_admin_0_countries.geojson')
+                .then(res => res.json())
+                .then(countries => {
+                    document.getElementById('loading-indicator').style.display = 'none';
+
+                    worldGlobe = Globe()
+                        (document.getElementById('globeViz'))
+                        .globeImageUrl('//unpkg.com/three-globe/example/img/earth-night.jpg') 
+                        .polygonsData(countries.features)
+                        .polygonAltitude(0.01)
+                        .polygonCapColor(feat => {
+                            const countryName = feat.properties.ADMIN;
+                            return activeCountries.includes(countryName) ? 'rgba(52, 199, 89, 0.9)' : 'rgba(100, 100, 100, 0.2)';
+                        })
+                        .polygonSideColor(() => 'rgba(0, 0, 0, 0.1)')
+                        .polygonStrokeColor(() => '#111')
+                        .polygonLabel(({ properties: d }) => `
+                            <div style="background: rgba(0,0,0,0.8); padding: 8px; border-radius: 8px; color: white; font-family: sans-serif;">
+                                <b>${d.ADMIN}</b>
+                            </div>
+                        `)
+                        .onPolygonClick(({ properties: d }) => {
+                            openModal(d.ADMIN, getFlagEmoji(d.ISO_A2));
+                        });
+
+                    worldGlobe.controls().autoRotate = true;
+                    worldGlobe.controls().autoRotateSpeed = 0.5; 
+                    worldGlobe.controls().enableZoom = true; 
+                    worldGlobe.pointOfView({ altitude: 2.2 });
+                });
+        });
+
+        function openModal(countryName, flagEmoji) {
+            document.getElementById("country-title").innerText = flagEmoji + " " + countryName;
+            const historyContainer = document.getElementById("previous-answers");
+            historyContainer.innerHTML = "";
+            const countryData = globalData.filter(item => item.country === countryName);
+            
+            if (countryData.length > 0) {
+                countryData.forEach(entry => {
+                    historyContainer.innerHTML += `
+                        <div class="history-card">
+                            <p><span>Food:</span> ${entry.food}</p>
+                            <p><span>City:</span> ${entry.city}</p>
+                            <p><span>Nature:</span> ${entry.nature}</p>
+                            <p><span>Music:</span> ${entry.music}</p>
+                            <p><span>Name:</span> ${entry.name || 'Anonymous'}</p>
+                        </div>
+                    `;
+                });
+            } else {
+                historyContainer.innerHTML = `<p style="color: #8e8e93; font-size: 15px; font-style: italic; text-align: center;">No recommendations for this country yet.</p>`;
+            }
+            document.getElementById("modal").style.display = "flex";
+        }
+
+        function closeModal() { document.getElementById("modal").style.display = "none"; }
+
+        document.getElementById("view-all-btn").addEventListener("click", () => {
+            const listContainer = document.getElementById("all-responses-list");
+            listContainer.innerHTML = "";
+
+            if (globalData.length === 0) {
+                listContainer.innerHTML = `<p style="color: #8e8e93; text-align: center; margin-top: 20px;">No recommendations yet.</p>`;
+            } else {
+                const sortedData = [...globalData].sort((a, b) => a.country.localeCompare(b.country));
+                sortedData.forEach(entry => {
+                    let cCode = "🌍";
+                    if(entry.country === 'Hong Kong') cCode = 'HK';
+                    
+                    listContainer.innerHTML += `
+                        <div class="history-card">
+                            <h4>${getFlagEmoji(cCode)} ${entry.country}</h4>
+                            <p><span>Food:</span> ${entry.food}</p>
+                            <p><span>City:</span> ${entry.city}</p>
+                            <p><span>Nature:</span> ${entry.nature}</p>
+                            <p><span>Music:</span> ${entry.music}</p>
+                            <p><span>Name:</span> ${entry.name || 'Anonymous'}</p>
+                        </div>
+                    `;
+                });
+            }
+            document.getElementById("all-responses-modal").style.display = "flex";
+        });
+
+        function closeAllResponsesModal() { document.getElementById("all-responses-modal").style.display = "none"; }
+    </script>
+</body>
+</html>
