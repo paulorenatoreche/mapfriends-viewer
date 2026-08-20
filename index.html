@@ -11,21 +11,25 @@
         html, body {
             margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-            background-color: #000000; /* Fundo preto para o espaço 3D */
+            background-color: #000000;
             -webkit-font-smoothing: antialiased;
         }
 
-        #globeViz, #map-container-2d {
+        #globeViz {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1;
-        }
-        
-        /* Oculta o 2D por padrão */
-        #map-container-2d {
-            display: none;
-            background-color: #ffffff;
+            transition: opacity 0.4s ease; /* Efeito de transição suave */
         }
 
-        /* Oculta os botões de zoom nativos do 2D */
+        #map-container-2d {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2;
+            background-color: #ffffff;
+            /* Solução do Bug: Esconde usando opacidade e visibilidade, mantendo as dimensões reais */
+            visibility: hidden;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.4s ease;
+        }
+
         .jvm-zoom-btn {
             display: none !important;
         }
@@ -45,7 +49,6 @@
             outline: none;
         }
 
-        /* Estilo alternativo quando o mapa for 2D claro (para os botões não sumirem no branco) */
         .light-mode-ui .list-btn, .light-mode-ui .map-select {
             background: rgba(255, 255, 255, 0.85);
             color: #1c1c1e;
@@ -126,7 +129,7 @@
 
     <div class="modal-overlay" id="all-responses-modal">
         <div class="modal-content">
-            <h2>🌍 Connections</h2>
+            <h2>🌍 All Connections</h2>
             <p class="subtitle">Everyone you've met globally (A-Z)</p>
             <div id="all-responses-list"></div>
             <button class="close-btn" type="button" onclick="closeAllResponsesModal()">Close</button>
@@ -146,10 +149,11 @@
         let map2D;
         let activeCountries = [];
 
+        // Adicionado 'https:' para maior segurança na requisição
         const mapStyles = {
-            night: '//unpkg.com/three-globe/example/img/earth-night.jpg',
-            day: '//unpkg.com/three-globe/example/img/earth-day.jpg',
-            satellite: '//unpkg.com/three-globe/example/img/earth-blue-marble.jpg'
+            night: 'https://unpkg.com/three-globe/example/img/earth-night.jpg',
+            day: 'https://unpkg.com/three-globe/example/img/earth-day.jpg',
+            satellite: 'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg'
         };
 
         function getFlagEmoji(countryCode) {
@@ -169,7 +173,7 @@
 
             activeCountries = [...new Set(globalData.map(item => item.country))];
 
-            // 2. Inicializa o Mapa 2D (jsvectormap)
+            // 2. Inicializa o Mapa 2D (Agora seguro pois ele tem tamanho real na tela, apenas está invisível)
             map2D = new jsVectorMap({
                 selector: "#map-container-2d",
                 map: "world",
@@ -178,7 +182,7 @@
                 zoomButtons: false,
                 regionStyle: {
                     initial: { fill: "#e5e5ea", stroke: "#ffffff", strokeWidth: 0.5 },
-                    selected: { fill: "rgba(52, 199, 89, 0.5)" }, // 50% de Transparência
+                    selected: { fill: "rgba(52, 199, 89, 0.5)" }, // Transparência 50%
                     hover: { fill: "#c7c7cc" }
                 },
                 onRegionClick: function(event, code) {
@@ -194,7 +198,7 @@
             }
             if(codesToSelect2D.length > 0) map2D.setSelectedRegions(codesToSelect2D);
 
-            // 3. Inicializa o Globo 3D (Globe.gl)
+            // 3. Inicializa o Globo 3D
             fetch('https://raw.githubusercontent.com/vasturiano/globe.gl/master/example/datasets/ne_110m_admin_0_countries.geojson')
                 .then(res => res.json())
                 .then(countries => {
@@ -208,7 +212,7 @@
                         .polygonAltitude(0.01)
                         .polygonCapColor(feat => {
                             const countryName = feat.properties.ADMIN;
-                            // 50% de transparência para países com resposta
+                            // Transparência 50% no globo também
                             return activeCountries.includes(countryName) ? 'rgba(52, 199, 89, 0.5)' : 'rgba(100, 100, 100, 0.15)';
                         })
                         .polygonSideColor(() => 'rgba(0, 0, 0, 0.1)')
@@ -229,22 +233,36 @@
                 });
         });
 
-        // Evento para trocar a cor e o tipo do mapa
+        // Alternância Suave entre Mapa 2D e Globo 3D
         document.getElementById('map-style-selector').addEventListener('change', (e) => {
             const selectedStyle = e.target.value;
             const uiBar = document.getElementById('ui-bar');
             
+            const globeContainer = document.getElementById('globeViz');
+            const map2DContainer = document.getElementById('map-container-2d');
+
             if (selectedStyle === '2d') {
                 // Ativa a interface 2D Clara
-                document.getElementById('globeViz').style.display = 'none';
-                document.getElementById('map-container-2d').style.display = 'block';
+                globeContainer.style.opacity = '0';
+                globeContainer.style.visibility = 'hidden';
+                globeContainer.style.pointerEvents = 'none';
+
+                map2DContainer.style.visibility = 'visible';
+                map2DContainer.style.opacity = '1';
+                map2DContainer.style.pointerEvents = 'auto';
+                
                 uiBar.classList.add('light-mode-ui');
-                // Força o jsvectormap a recalcular o tamanho na tela
                 window.dispatchEvent(new Event('resize')); 
             } else {
-                // Ativa a interface 3D Escura/Espacial
-                document.getElementById('globeViz').style.display = 'block';
-                document.getElementById('map-container-2d').style.display = 'none';
+                // Ativa a interface 3D
+                globeContainer.style.visibility = 'visible';
+                globeContainer.style.opacity = '1';
+                globeContainer.style.pointerEvents = 'auto';
+
+                map2DContainer.style.opacity = '0';
+                map2DContainer.style.visibility = 'hidden';
+                map2DContainer.style.pointerEvents = 'none';
+
                 uiBar.classList.remove('light-mode-ui');
                 
                 worldGlobe.globeImageUrl(mapStyles[selectedStyle]);
@@ -283,7 +301,6 @@
 
         function closeModal() { document.getElementById("modal").style.display = "none"; }
 
-        // Lógica da Lista Completa com correção de Bandeiras
         document.getElementById("view-all-btn").addEventListener("click", () => {
             const listContainer = document.getElementById("all-responses-list");
             listContainer.innerHTML = "";
@@ -298,12 +315,10 @@
                     if(entry.country === 'Hong Kong') {
                         cCode = 'HK';
                     } else {
-                        // Cruza o nome do país com a base de dados do mapa para achar a sigla ISO exata
                         const countryFeature = geoJsonFeatures.find(f => f.properties.ADMIN === entry.country);
                         if(countryFeature) {
                             cCode = countryFeature.properties.ISO_A2;
                         } else {
-                            // Tenta achar a sigla no jsvectormap caso os nomes divirjam levemente
                             for(let code in map2D.regions) {
                                 if(map2D.regions[code].config.name === entry.country) { cCode = code; break; }
                             }
