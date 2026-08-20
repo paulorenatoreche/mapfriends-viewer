@@ -17,16 +17,13 @@
 
         #globeViz {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1;
-            transition: opacity 0.4s ease; /* Efeito de transição suave */
+            transition: opacity 0.4s ease;
         }
 
         #map-container-2d {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2;
             background-color: #ffffff;
-            /* Solução do Bug: Esconde usando opacidade e visibilidade, mantendo as dimensões reais */
-            visibility: hidden;
-            opacity: 0;
-            pointer-events: none;
+            visibility: hidden; opacity: 0; pointer-events: none;
             transition: opacity 0.4s ease;
         }
 
@@ -50,18 +47,14 @@
         }
 
         .light-mode-ui .list-btn, .light-mode-ui .map-select {
-            background: rgba(255, 255, 255, 0.85);
-            color: #1c1c1e;
-            border: 1px solid #d1d1d6;
+            background: rgba(255, 255, 255, 0.85); color: #1c1c1e; border: 1px solid #d1d1d6;
         }
         .light-mode-ui .map-select option { background: #ffffff; color: #1c1c1e; }
         .light-mode-ui .list-btn svg { stroke: #1c1c1e; }
 
         .list-btn { padding: 12px 20px; }
         
-        .map-select {
-            appearance: none; -webkit-appearance: none; text-align: center;
-        }
+        .map-select { appearance: none; -webkit-appearance: none; text-align: center; }
         .map-select option { background: #1c1c1e; color: #fff; }
 
         .modal-overlay {
@@ -147,9 +140,10 @@
         let geoJsonFeatures = []; 
         let worldGlobe;
         let map2D;
-        let activeCountries = [];
+        
+        // Uso de Set (Conjunto) para ganho dramático de performance na hora de colorir o mapa
+        let activeCountriesSet = new Set();
 
-        // Adicionado 'https:' para maior segurança na requisição
         const mapStyles = {
             night: 'https://unpkg.com/three-globe/example/img/earth-night.jpg',
             day: 'https://unpkg.com/three-globe/example/img/earth-day.jpg',
@@ -162,6 +156,13 @@
             return String.fromCodePoint(...codePoints);
         }
 
+        // Função crucial que resolve o bug dos Estados Unidos
+        function getStandardCountryName(globeName) {
+            if (globeName === 'United States of America') return 'United States';
+            if (globeName === 'The Bahamas') return 'Bahamas';
+            return globeName;
+        }
+
         document.addEventListener("DOMContentLoaded", async () => {
             // 1. Carrega Banco de Dados
             try {
@@ -171,34 +172,10 @@
                 console.error("Erro ao carregar dados:", error);
             }
 
-            activeCountries = [...new Set(globalData.map(item => item.country))];
+            // Otimização: Estrutura de dados hiper-rápida (Set) em vez de Array comum
+            activeCountriesSet = new Set(globalData.map(item => item.country));
 
-            // 2. Inicializa o Mapa 2D (Agora seguro pois ele tem tamanho real na tela, apenas está invisível)
-            map2D = new jsVectorMap({
-                selector: "#map-container-2d",
-                map: "world",
-                backgroundColor: "#ffffff",
-                zoomOnScroll: true,
-                zoomButtons: false,
-                regionStyle: {
-                    initial: { fill: "#e5e5ea", stroke: "#ffffff", strokeWidth: 0.5 },
-                    selected: { fill: "rgba(52, 199, 89, 0.5)" }, // Transparência 50%
-                    hover: { fill: "#c7c7cc" }
-                },
-                onRegionClick: function(event, code) {
-                    const countryName = map2D.regions[code].config.name;
-                    openModal(countryName, getFlagEmoji(code));
-                }
-            });
-
-            // Colore os países no mapa 2D
-            const codesToSelect2D = [];
-            for (let code in map2D.regions) {
-                if (activeCountries.includes(map2D.regions[code].config.name)) codesToSelect2D.push(code);
-            }
-            if(codesToSelect2D.length > 0) map2D.setSelectedRegions(codesToSelect2D);
-
-            // 3. Inicializa o Globo 3D
+            // 2. Inicializa o Globo 3D
             fetch('https://raw.githubusercontent.com/vasturiano/globe.gl/master/example/datasets/ne_110m_admin_0_countries.geojson')
                 .then(res => res.json())
                 .then(countries => {
@@ -211,19 +188,20 @@
                         .polygonsData(countries.features)
                         .polygonAltitude(0.01)
                         .polygonCapColor(feat => {
-                            const countryName = feat.properties.ADMIN;
-                            // Transparência 50% no globo também
-                            return activeCountries.includes(countryName) ? 'rgba(52, 199, 89, 0.5)' : 'rgba(100, 100, 100, 0.15)';
+                            // Bug dos Estados Unidos corrigido aqui!
+                            const countryName = getStandardCountryName(feat.properties.ADMIN);
+                            return activeCountriesSet.has(countryName) ? 'rgba(52, 199, 89, 0.5)' : 'rgba(100, 100, 100, 0.15)';
                         })
                         .polygonSideColor(() => 'rgba(0, 0, 0, 0.1)')
                         .polygonStrokeColor(() => '#111')
                         .polygonLabel(({ properties: d }) => `
                             <div style="background: rgba(0,0,0,0.8); padding: 8px; border-radius: 8px; color: white; font-family: sans-serif;">
-                                <b>${d.ADMIN}</b>
+                                <b>${getStandardCountryName(d.ADMIN)}</b>
                             </div>
                         `)
                         .onPolygonClick(({ properties: d }) => {
-                            openModal(d.ADMIN, getFlagEmoji(d.ISO_A2));
+                            const cName = getStandardCountryName(d.ADMIN);
+                            openModal(cName, getFlagEmoji(d.ISO_A2));
                         });
 
                     worldGlobe.controls().autoRotate = true;
@@ -233,11 +211,38 @@
                 });
         });
 
+        // Lógica de Lazy Loading para resolver lentidão e o bug do Mapa 2D em branco
+        function initialize2DMap() {
+            if (map2D) return; // Já foi criado
+
+            map2D = new jsVectorMap({
+                selector: "#map-container-2d",
+                map: "world",
+                backgroundColor: "#ffffff",
+                zoomOnScroll: true,
+                zoomButtons: false,
+                regionStyle: {
+                    initial: { fill: "#e5e5ea", stroke: "#ffffff", strokeWidth: 0.5 },
+                    selected: { fill: "rgba(52, 199, 89, 0.5)" },
+                    hover: { fill: "#c7c7cc" }
+                },
+                onRegionClick: function(event, code) {
+                    const countryName = map2D.regions[code].config.name;
+                    openModal(countryName, getFlagEmoji(code));
+                }
+            });
+
+            const codesToSelect2D = [];
+            for (let code in map2D.regions) {
+                if (activeCountriesSet.has(map2D.regions[code].config.name)) codesToSelect2D.push(code);
+            }
+            if(codesToSelect2D.length > 0) map2D.setSelectedRegions(codesToSelect2D);
+        }
+
         // Alternância Suave entre Mapa 2D e Globo 3D
         document.getElementById('map-style-selector').addEventListener('change', (e) => {
             const selectedStyle = e.target.value;
             const uiBar = document.getElementById('ui-bar');
-            
             const globeContainer = document.getElementById('globeViz');
             const map2DContainer = document.getElementById('map-container-2d');
 
@@ -252,7 +257,11 @@
                 map2DContainer.style.pointerEvents = 'auto';
                 
                 uiBar.classList.add('light-mode-ui');
+                
+                // Inicializa o 2D SOMENTE agora que ele está visível (Resolve o Bug e a Lentidão!)
+                initialize2DMap();
                 window.dispatchEvent(new Event('resize')); 
+                
             } else {
                 // Ativa a interface 3D
                 globeContainer.style.visibility = 'visible';
@@ -301,6 +310,7 @@
 
         function closeModal() { document.getElementById("modal").style.display = "none"; }
 
+        // Lógica da Lista Completa
         document.getElementById("view-all-btn").addEventListener("click", () => {
             const listContainer = document.getElementById("all-responses-list");
             listContainer.innerHTML = "";
@@ -315,12 +325,15 @@
                     if(entry.country === 'Hong Kong') {
                         cCode = 'HK';
                     } else {
-                        const countryFeature = geoJsonFeatures.find(f => f.properties.ADMIN === entry.country);
+                        // Cruza o nome padronizado com os dados do mapa 3D
+                        const countryFeature = geoJsonFeatures.find(f => getStandardCountryName(f.properties.ADMIN) === entry.country);
                         if(countryFeature) {
                             cCode = countryFeature.properties.ISO_A2;
                         } else {
-                            for(let code in map2D.regions) {
-                                if(map2D.regions[code].config.name === entry.country) { cCode = code; break; }
+                            if (map2D) {
+                                for(let code in map2D.regions) {
+                                    if(map2D.regions[code].config.name === entry.country) { cCode = code; break; }
+                                }
                             }
                         }
                     }
